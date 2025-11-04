@@ -109,11 +109,11 @@ for batch in data_loader:
         
     for layer_name in float_outputs:
         if layer_name in quant_outputs:
-            float_val = float_outputs[layer_name].flatten().numpy()
-            quant_val = quant_outputs[layer_name].flatten().numpy()
-            print(f'layer_name:{layer_name}')
-            print(f'float_val {float_val}')
-            print(f'quant_val {float_val}')
+            float_val = float_outputs[layer_name].flatten().cpu().numpy()
+            quant_val = quant_outputs[layer_name].flatten().cpu().numpy()
+#            print(f'layer_name:{layer_name}')
+#            print(f'float_val {float_val}')
+#            print(f'quant_val {float_val}')
             
         
 #from modelopt.torch.export import export_hf_checkpoint
