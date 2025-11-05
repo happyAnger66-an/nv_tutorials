@@ -2,19 +2,12 @@ import torch
 from torch.utils.data import DataLoader
 from torch import nn    
 
-from torchvision import datasets
-from torchvision.transforms import ToTensor
-
 import modelopt.torch.quantization as mtq
 
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
-    
-print(f"Using {device} device")
+from data_ref import training_data 
+from model_def import NeuralNetwork, test
+from device_sel import device
 
-from model_def import NeuralNetwork
 model = NeuralNetwork().to(device)
 model.load_state_dict(torch.load("model.pth", weights_only=True))
 # Setup the model
@@ -27,54 +20,14 @@ config = mtq.INT8_SMOOTHQUANT_CFG
 # An example of creating a calibration data loader looks like the following:
 #data_loader = get_dataloader(num_samples=calib_size)
 
-# Download training data from open datasets.
-training_data = datasets.FashionMNIST(
-    root="data",
-    train=True,
-    download=True,
-    transform=ToTensor(),
-)
-
-# Download test data from open datasets.
-test_data = datasets.FashionMNIST(
-    root="data",
-    train=False,
-    download=True,
-    transform=ToTensor(),
-)
-
 batch_size = 64
 data_loader = DataLoader(training_data, batch_size=batch_size)
 
-loss_fn = nn.CrossEntropyLoss()
-def test(dataloader, model, loss_fn):
-    size = len(dataloader.dataset)
-    num_batches = len(dataloader)
-    model.eval()
-    test_loss, correct = 0, 0
-    with torch.no_grad():
-        for X, y in dataloader:
-            X, y = X.to(device), y.to(device)
-            pred = model(X)
-            test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-    test_loss /= num_batches
-    correct /= size
-    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
-
-def get_layer_outputs(model, hook_dict):
-    hooks = []
-    for name, module in model.named_modules():
-        if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear, torch.nn.ReLU)):
-            hook = module.register_forward_hook(
-                lambda m, i, o, name=name: hook_dict.update({name: o.detach()})
-            )
-            hooks.append(hook)
-    return hooks
-
+from hooks.torch_hooks import hook_module_outputs
 float_outputs = {}
 quant_outputs = {}
 current_round = 0
+
 # Define forward_loop. Please wrap the data loader in the forward_loop
 def forward_loop(model):
     for batch in data_loader:
@@ -83,39 +36,57 @@ def forward_loop(model):
         model(X)
        
 print(f'before quantize\n')
+loss_fn = nn.CrossEntropyLoss()
 test(data_loader, model, loss_fn)
+
+import copy
+q_model = copy.deepcopy(model)
+
 # Quantize the model and perform calibration (PTQ)
-q_model = mtq.quantize(model, config, forward_loop)
+q_model = mtq.quantize(q_model, config, forward_loop)
+print(f'no quantize model: {model}')
+print(f'quantize model: {q_model}')
 
 current_round = 1
 print(f'after quantize\n')
 test(data_loader, model, loss_fn)
 
-for batch in data_loader:
-    hooks_funcs = []
-    hooks_funcs = get_layer_outputs(model, float_outputs)
-        
+before_hooks_funcs = hook_module_outputs(model, float_outputs)
+after_hooks_funcs = hook_module_outputs(q_model, quant_outputs)
+mse_loss_fn = nn.MSELoss()
+
+import wandb
+run = wandb.init(
+    # Set the wandb entity where your project will be logged (generally your team name).
+    entity="happyanger66-nio",
+    # Set the wandb project where this run will be logged.
+    project="my-quantization-resnet",
+    # Track hyperparameters and run metadata.
+    config={
+        "architecture": "resnet",
+        "method": "INT8_SMOOTHQUANT",
+    },
+)
+
+for i, batch in enumerate(data_loader):
     x, y = batch
     X = x.to(device)
+   
+    float_outputs.clear() 
+    quant_outputs.clear()
+    
     model(X)
-    
-    for hook in hooks_funcs:
-        hook.remove()
-    
-    hooks_funcs = get_layer_outputs(model, quant_outputs)
     q_model(X)
-    for hook in hooks_funcs:
-        hook.remove()
-        
+   
     for layer_name in float_outputs:
         if layer_name in quant_outputs:
-            float_val = float_outputs[layer_name].flatten().cpu().numpy()
-            quant_val = quant_outputs[layer_name].flatten().cpu().numpy()
-#            print(f'layer_name:{layer_name}')
-#            print(f'float_val {float_val}')
-#            print(f'quant_val {float_val}')
-            
-        
+            float_val = float_outputs[layer_name].cpu()
+            quant_val = quant_outputs[layer_name].cpu()
+            mse = mse_loss_fn(float_val, quant_val)
+            print(f'i:{i} layer_name:{layer_name} mse:{mse}')
+            run.log({f"{layer_name}_mse": mse})
+
+run.finish()        
 #from modelopt.torch.export import export_hf_checkpoint
 
 #with torch.inference_mode():
