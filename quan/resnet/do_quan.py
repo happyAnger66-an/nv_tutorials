@@ -3,6 +3,11 @@ from torch.utils.data import DataLoader
 from torch import nn    
 
 import modelopt.torch.quantization as mtq
+from modelopt.torch.export import (
+    export_hf_checkpoint,
+    export_tensorrt_llm_checkpoint,
+    get_model_type,
+)
 
 from data_ref import training_data 
 from model_def import NeuralNetwork, test
@@ -14,7 +19,8 @@ model.load_state_dict(torch.load("model.pth", weights_only=True))
 #model = get_model()
 
 # Select quantization config
-config = mtq.INT8_SMOOTHQUANT_CFG
+#config = mtq.INT8_SMOOTHQUANT_CFG
+config = mtq.INT8_DEFAULT_CFG
 
 # Quantization need calibration data. Setup calibration data loader
 # An example of creating a calibration data loader looks like the following:
@@ -41,16 +47,39 @@ test(data_loader, model, loss_fn)
 
 import copy
 q_model = copy.deepcopy(model)
+torch.onnx.export(
+    model,
+    torch.randn((64, 1, 28, 28), dtype=torch.float32).cuda(),
+    "./no_action_expert.onnx",
+    export_params=True,
+    dynamo=True,
+    do_constant_folding=True,
+)
+    
 
 # Quantize the model and perform calibration (PTQ)
 q_model = mtq.quantize(q_model, config, forward_loop)
+import modelopt.torch.opt as mto
+#mto.save(q_model, 'quan_model.pth', dtype=torch.int8)
+
 print(f'no quantize model: {model}')
 print(f'quantize model: {q_model}')
 
 current_round = 1
 print(f'after quantize\n')
-test(data_loader, model, loss_fn)
-
+test(data_loader, q_model, loss_fn)
+mtq.print_quant_summary(q_model)
+torch.onnx.export(
+    q_model,
+    (torch.randn((64, 1, 28, 28), dtype=torch.float32).cuda()),
+    "./action_expert.onnx",
+    export_params=True,
+#    dynamo=True,
+    input_names=["x"],
+    output_names=["output"],
+    do_constant_folding=True,
+    )
+    
 before_hooks_funcs = hook_module_outputs(model, float_outputs)
 after_hooks_funcs = hook_module_outputs(q_model, quant_outputs)
 mse_loss_fn = nn.MSELoss()
@@ -83,7 +112,6 @@ for i, batch in enumerate(data_loader):
             float_val = float_outputs[layer_name].cpu()
             quant_val = quant_outputs[layer_name].cpu()
             mse = mse_loss_fn(float_val, quant_val)
-            print(f'i:{i} layer_name:{layer_name} mse:{mse}')
             run.log({f"{layer_name}_mse": mse})
 
 run.finish()        
