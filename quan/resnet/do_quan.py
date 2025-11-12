@@ -20,7 +20,7 @@ model.load_state_dict(torch.load("model.pth", weights_only=True))
 
 # Select quantization config
 #config = mtq.INT8_SMOOTHQUANT_CFG
-config = mtq.INT8_DEFAULT_CFG
+config = mtq.FP8_DEFAULT_CFG
 
 # Quantization need calibration data. Setup calibration data loader
 # An example of creating a calibration data loader looks like the following:
@@ -50,7 +50,7 @@ q_model = copy.deepcopy(model)
 torch.onnx.export(
     model,
     torch.randn((64, 1, 28, 28), dtype=torch.float32).cuda(),
-    "./no_action_expert.onnx",
+    "./output/no_quan_resnet.onnx",
     export_params=True,
     dynamo=True,
     do_constant_folding=True,
@@ -72,14 +72,15 @@ mtq.print_quant_summary(q_model)
 torch.onnx.export(
     q_model,
     (torch.randn((64, 1, 28, 28), dtype=torch.float32).cuda()),
-    "./action_expert.onnx",
+    "./output/quan_resnet.onnx",
     export_params=True,
 #    dynamo=True,
     input_names=["x"],
     output_names=["output"],
     do_constant_folding=True,
     )
-    
+
+'''
 before_hooks_funcs = hook_module_outputs(model, float_outputs)
 after_hooks_funcs = hook_module_outputs(q_model, quant_outputs)
 mse_loss_fn = nn.MSELoss()
@@ -122,3 +123,4 @@ run.finish()
 #        model,  # The quantized model.
 #        export_dir="."
 #    )
+'''
