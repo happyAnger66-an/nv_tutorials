@@ -1,10 +1,10 @@
 from typing import Optional
 
 import torch
-from torch import nn
 from tensorrt_llm.models.modeling_utils import DecoderModelForCausalLM, \
     register_auto_model, QuantConfig, PretrainedConfig
 from tensorrt_llm.mapping import Mapping
+from tensorrt_llm.module import Module
 from tensorrt_llm.layers import Embedding, Linear
 
 class XiaoanConfig(PretrainedConfig):
@@ -28,9 +28,10 @@ class XiaoanConfig(PretrainedConfig):
         #self.mapping = Mapping()
 
 
-class XiaoanTransformer(nn.Module):
+class XiaoanTransformer(Module):
     def __init__(self, config):
         print(f'Xiaoan Transformer init')
+        super().__init__()
         self.vocab_embedding = Embedding(config.vocab_size, config.hidden_size,
                                          dtype=config.dtype)
 
