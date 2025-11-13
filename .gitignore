@@ -8,3 +8,5 @@ wandb/
 *.data
 *.zip
 *.cache
+*.engine
+*.safetensors
