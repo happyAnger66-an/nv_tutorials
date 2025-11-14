@@ -86,7 +86,7 @@
             "cluster_key": "NVIDIA-GeForce-RTX-4070",
             "cluster_info": {
                 "inter_node_bw_per_device": 25,
-                "intra_node_bw_per_device": 5,
+                "intra_node_bw_per_device": 10,
                 "inter_node_latency": 10,
                 "intra_node_latency": 10,
                 "intra_node_sharp": false,
